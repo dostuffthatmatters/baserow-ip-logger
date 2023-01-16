@@ -1,5 +1,6 @@
 # custom
 config.json
+state.json
 hidden/
 
 # Created by https://www.toptal.com/developers/gitignore/api/macos,linux,python

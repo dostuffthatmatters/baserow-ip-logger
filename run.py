@@ -8,6 +8,7 @@ from pydantic import BaseModel
 import requests
 
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+STATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
 
 
 class Config(BaseModel):
@@ -15,6 +16,12 @@ class Config(BaseModel):
     db_token: str
     db_table_id: str
     db_node_identifier_field_id: str
+
+
+class State(BaseModel):
+    node_identifier: str
+    local_ip: str
+    public_ip: str
 
 
 def run_shell_command(command: str, working_directory: Optional[str] = None) -> str:
@@ -62,13 +69,6 @@ def delete_row_ids(config: Config, row_ids: list[int]) -> list[int]:
     assert response.status_code == 204, f"response failed: {response.json()}"
 
 
-def get_pulic_ip() -> str:
-    response = requests.get("http://checkip.dyndns.com/")
-    ip_address_matches = re.compile(r"\d+\.\d+\.\d+\.\d+").findall(response.text)
-    assert len(ip_address_matches) == 1
-    return ip_address_matches[0]
-
-
 def get_local_ip() -> str:
     if sys.platform == "darwin":
         interface_names = run_shell_command("ipconfig getiflist").split(" ")
@@ -111,7 +111,14 @@ def get_local_ip() -> str:
         return "unknown"
 
 
-def create_row(config: Config) -> list[int]:
+def get_public_ip() -> str:
+    response = requests.get("http://checkip.dyndns.com/")
+    ip_address_matches = re.compile(r"\d+\.\d+\.\d+\.\d+").findall(response.text)
+    assert len(ip_address_matches) == 1
+    return ip_address_matches[0]
+
+
+def create_row(config: Config, new_local_ip: str, new_public_ip: str) -> list[int]:
     response = requests.post(
         f"https://api.baserow.io/api/database/rows/table/{config.db_table_id}/?user_field_names=true",
         headers={
@@ -120,8 +127,8 @@ def create_row(config: Config) -> list[int]:
         },
         json={
             "node-identifier": config.node_identifier,
-            "local-ip-address": get_local_ip(),
-            "public-ip-address": get_pulic_ip(),
+            "local-ip-address": new_local_ip,
+            "public-ip-address": new_public_ip,
         },
     )
     assert response.status_code == 200, f"response failed: {response.json()}"
@@ -132,12 +139,51 @@ if __name__ == "__main__":
     with open(CONFIG_PATH) as f:
         config = Config(**json.load(f))
 
+    # load old entry
+    old_node_identifier: Optional[str] = None
+    old_local_ip: Optional[str] = None
+    old_public_ip: Optional[str] = None
+    if os.path.isfile(STATE_PATH):
+        with open(STATE_PATH) as f:
+            state = State(**json.load(f))
+            old_node_identifier = state.node_identifier
+            old_local_ip = state.local_ip
+            old_public_ip = state.public_ip
+
+    # determine new entry
+    new_node_identifier = config.node_identifier
+    new_local_ip = get_local_ip()
+    new_public_ip = get_public_ip()
+
+    # abort when nothing has changed -> no network requests
+    if all(
+        [
+            old_node_identifier == new_node_identifier,
+            old_local_ip == new_local_ip,
+            old_public_ip == new_public_ip,
+        ]
+    ):
+        print("nothing has changed")
+        exit(0)
+
     # get list of outdated entries
     existing_row_ids = get_existing_row_ids(config)
-    print(f"existing_row_ids = {existing_row_ids}")
+    print(f"old row ids: {existing_row_ids}")
 
     # add new entry
-    create_row(config)
+    create_row(config, new_local_ip, new_public_ip)
 
     # remove existing rows after successful update
     delete_row_ids(config, existing_row_ids)
+
+    # save new entry
+    with open(STATE_PATH, "w") as f:
+        json.dump(
+            State(
+                node_identifier=new_node_identifier,
+                local_ip=new_local_ip,
+                public_ip=new_public_ip,
+            ).dict(),
+            f,
+            indent=4,
+        )
