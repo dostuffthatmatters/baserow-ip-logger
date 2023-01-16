@@ -14,6 +14,7 @@ class Config(BaseModel):
     node_identifier: str
     db_token: str
     db_table_id: str
+    db_node_identifier_field_id: str
 
 
 def run_shell_command(command: str, working_directory: Optional[str] = None) -> str:
@@ -38,7 +39,7 @@ def get_existing_row_ids(config: Config) -> list[int]:
     response = requests.get(
         f"https://api.baserow.io/api/database/rows/table/"
         + f"{config.db_table_id}/?user_field_names=true&filter__"
-        + f"node-identifier__equal={config.node_identifier}",
+        + f"{config.db_node_identifier_field_id}__equal={config.node_identifier}",
         headers={"Authorization": f"Token {config.db_token}"},
     )
     assert response.status_code == 200, f"response failed: {response.json()}"
@@ -78,16 +79,25 @@ def get_local_ip() -> str:
                 pass
         return "; ".join(local_interface_ips)
     elif sys.platform == "linux":
-        interface_names = run_shell_command("ls /sys/class/net").replace("\t", " ").split(" ")
+        interface_names = (
+            run_shell_command("ls /sys/class/net")
+            .replace("\n", " ")
+            .replace("\t", " ")
+            .split(" ")
+        )
         local_interface_ips: list[str] = []
         for interface_name in interface_names:
+            if ("en" not in interface_name) and ("wlan" not in interface_name):
+                continue
             try:
-                local_interface_config = run_shell_command(
-                    f"ifconfig {interface_name}"
+                local_interface_config = run_shell_command(f"ifconfig {interface_name}")
+                ip_matches = re.compile(r"inet\s+\d+\.\d+\.\d+\.\d+").findall(
+                    local_interface_config
                 )
-                ip_matches = re.compile(r"inet\s+\d+\.\d+\.\d+\.\d+").findall(local_interface_config)
                 assert len(ip_matches) == 1
-                local_interface_ips.append(f"{interface_name}: {ip_matches[0]}")
+                local_interface_ips.append(
+                    f"{interface_name}: {ip_matches[0].replace('inet ', '')}"
+                )
             except:
                 pass
         return "; ".join(local_interface_ips)
