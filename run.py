@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 from pydantic import BaseModel
 import requests
 
@@ -13,38 +14,41 @@ class Config(BaseModel):
 
 
 def get_existing_row_ids(config: Config) -> list[int]:
-    requests.get(
+    response = requests.get(
         f"https://api.baserow.io/api/database/rows/table/"
-        + f"{config.table_id}/?user_field_names=true&filter__"
+        + f"{config.db_table_id}/?user_field_names=true&filter__"
         + f"node-identifier__equal={config.node_identifier}",
-        headers={"Authorization": f"Token {config.baserow_db_token}"},
+        headers={"Authorization": f"Token {config.db_token}"},
     )
+    assert response.status_code == 200, f"response failed: {response.json()}"
+    return [r["id"] for r in response.json()["results"]]
 
 
 def delete_row_ids(config: Config, row_ids: list[int]) -> list[int]:
-    requests.post(
-        f"https://api.baserow.io/api/database/rows/table/{config.table_id}/batch-delete/",
+    response = requests.post(
+        f"https://api.baserow.io/api/database/rows/table/{config.db_table_id}/batch-delete/",
         headers={
-            "Authorization": f"Token {config.baserow_db_token}",
+            "Authorization": f"Token {config.db_token}",
             "Content-Type": "application/json",
         },
         json={"items": row_ids},
     )
+    assert response.status_code == 204, f"response failed: {response.json()}"
 
 
 def get_local_ip() -> str:
-    return ""
+    return "something_local"
 
 
 def get_public_ip() -> str:
-    return ""
+    return "something_public"
 
 
 def create_row(config: Config) -> list[int]:
-    requests.post(
-        f"https://api.baserow.io/api/database/rows/table/{config.table_id}?user_field_names=true",
+    response = requests.post(
+        f"https://api.baserow.io/api/database/rows/table/{config.db_table_id}/?user_field_names=true",
         headers={
-            "Authorization": f"Token {config.baserow_db_token}",
+            "Authorization": f"Token {config.db_token}",
             "Content-Type": "application/json",
         },
         json={
@@ -53,6 +57,7 @@ def create_row(config: Config) -> list[int]:
             "public-ip-address": get_public_ip(),
         },
     )
+    assert response.status_code == 200, f"response failed: {response.json()}"
 
 
 if __name__ == "__main__":
@@ -67,4 +72,4 @@ if __name__ == "__main__":
     create_row(config)
 
     # remove existing rows after successful update
-    delete_row_ids(existing_row_ids)
+    delete_row_ids(config, existing_row_ids)
