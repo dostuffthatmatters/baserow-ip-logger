@@ -24,14 +24,18 @@ def run_shell_command(command: str, working_directory: Optional[str] = None) -> 
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         cwd=working_directory,
+        env=os.environ.copy(),
     )
     stdout = p.stdout.decode("utf-8", errors="replace")
     stderr = p.stderr.decode("utf-8", errors="replace")
 
-    assert p.returncode == 0, (
+    error_message = (
         f"command '{command}' failed with exit code "
         + f"{p.returncode}: stderr = '{stderr}'"
     )
+    if p.returncode != 0:
+        print(error_message)
+    assert p.returncode == 0, error_message
     return stdout.strip()
 
 
@@ -85,9 +89,11 @@ def get_local_ip() -> str:
             .replace("\t", " ")
             .split(" ")
         )
+        print(f"interface_names = {interface_names}")
         local_interface_ips: list[str] = []
         for interface_name in interface_names:
             if ("en" not in interface_name) and ("wlan" not in interface_name):
+                print(f"skipping interface {interface_name}")
                 continue
             try:
                 local_interface_config = run_shell_command(f"ifconfig {interface_name}")
@@ -128,6 +134,7 @@ if __name__ == "__main__":
 
     # get list of outdated entries
     existing_row_ids = get_existing_row_ids(config)
+    print(f"existing_row_ids = {existing_row_ids}")
 
     # add new entry
     create_row(config)
