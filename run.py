@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 from typing import Optional
 from pydantic import BaseModel
@@ -12,8 +13,6 @@ class Config(BaseModel):
     node_identifier: str
     db_token: str
     db_table_id: str
-    get_local_ip_command: str
-    get_public_ip_command: str
 
 
 def run_shell_command(command: str, working_directory: Optional[str] = None) -> str:
@@ -57,6 +56,27 @@ def delete_row_ids(config: Config, row_ids: list[int]) -> list[int]:
     assert response.status_code == 204, f"response failed: {response.json()}"
 
 
+def get_pulic_ip() -> str:
+    response = requests.get("http://checkip.dyndns.com/")
+    ip_address_matches = re.compile(r"\d+\.\d+\.\d+\.\d+").findall(response.text)
+    assert len(ip_address_matches) == 1
+    return ip_address_matches[0]
+
+
+def get_local_ip() -> str:
+    interface_names = run_shell_command("ipconfig getiflist").split(" ")
+    local_interface_ips: list[str] = []
+    for interface_name in interface_names:
+        try:
+            local_interface_ip = run_shell_command(
+                f"ipconfig getifaddr {interface_name}"
+            )
+            local_interface_ips.append(f"{interface_name}: {local_interface_ip}")
+        except:
+            pass
+    return "; ".join(local_interface_ips)
+
+
 def create_row(config: Config) -> list[int]:
     response = requests.post(
         f"https://api.baserow.io/api/database/rows/table/{config.db_table_id}/?user_field_names=true",
@@ -66,8 +86,8 @@ def create_row(config: Config) -> list[int]:
         },
         json={
             "node-identifier": config.node_identifier,
-            "local-ip-address": run_shell_command(config.get_local_ip_command),
-            "public-ip-address": run_shell_command(config.get_public_ip_command),
+            "local-ip-address": get_local_ip(),
+            "public-ip-address": get_pulic_ip(),
         },
     )
     assert response.status_code == 200, f"response failed: {response.json()}"
