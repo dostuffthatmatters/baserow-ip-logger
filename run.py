@@ -92,8 +92,8 @@ def get_local_ip() -> str:
         print(f"interface_names = {interface_names}")
         local_interface_ips: list[str] = []
         for interface_name in interface_names:
-            if ("en" not in interface_name) and ("wlan" not in interface_name):
-                print(f"skipping interface {interface_name}")
+            if not any([s in interface_name for s in ["en", "eth", "wlan"]]):
+                print(f"skipping interface '{interface_name}'")
                 continue
             try:
                 local_interface_config = run_shell_command(f"ifconfig {interface_name}")
