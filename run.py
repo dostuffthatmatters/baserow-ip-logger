@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import sys
 import subprocess
 from typing import Optional
 from pydantic import BaseModel
@@ -64,17 +65,34 @@ def get_pulic_ip() -> str:
 
 
 def get_local_ip() -> str:
-    interface_names = run_shell_command("ipconfig getiflist").split(" ")
-    local_interface_ips: list[str] = []
-    for interface_name in interface_names:
-        try:
-            local_interface_ip = run_shell_command(
-                f"ipconfig getifaddr {interface_name}"
-            )
-            local_interface_ips.append(f"{interface_name}: {local_interface_ip}")
-        except:
-            pass
-    return "; ".join(local_interface_ips)
+    if sys.platform == "darwin":
+        interface_names = run_shell_command("ipconfig getiflist").split(" ")
+        local_interface_ips: list[str] = []
+        for interface_name in interface_names:
+            try:
+                local_interface_ip = run_shell_command(
+                    f"ipconfig getifaddr {interface_name}"
+                )
+                local_interface_ips.append(f"{interface_name}: {local_interface_ip}")
+            except:
+                pass
+        return "; ".join(local_interface_ips)
+    elif sys.platform == "linux":
+        interface_names = run_shell_command("ls /sys/class/net").replace("\t", " ").split(" ")
+        local_interface_ips: list[str] = []
+        for interface_name in interface_names:
+            try:
+                local_interface_config = run_shell_command(
+                    f"ifconfig {interface_name}"
+                )
+                ip_matches = re.compile(r"inet\s+\d+\.\d+\.\d+\.\d+").findall(local_interface_config)
+                assert len(ip_matches) == 1
+                local_interface_ips.append(f"{interface_name}: {ip_matches[0]}")
+            except:
+                pass
+        return "; ".join(local_interface_ips)
+    else:
+        return "unknown"
 
 
 def create_row(config: Config) -> list[int]:
