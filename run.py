@@ -60,7 +60,10 @@ def get_existing_row_ids(config: Config) -> list[int]:
     return [r["id"] for r in response.json()["results"]]
 
 
-def delete_row_ids(config: Config, row_ids: list[int]) -> list[int]:
+def delete_row_ids(config: Config, row_ids: list[int]) -> None:
+    if len(row_ids) == 0:
+        return
+
     response = requests.post(
         f"https://api.baserow.io/api/database/rows/table/{config.db_table_id}/batch-delete/",
         headers={
@@ -116,12 +119,14 @@ def get_local_ip() -> str:
 
 def get_public_ip() -> str:
     response = requests.get("http://checkip.dyndns.com/")
-    ip_address_matches = re.compile(r"\d+\.\d+\.\d+\.\d+").findall(response.text)
+    ip_address_matches: list[str] = re.compile(r"\d+\.\d+\.\d+\.\d+").findall(
+        response.text
+    )
     assert len(ip_address_matches) == 1
     return ip_address_matches[0]
 
 
-def create_row(config: Config, new_local_ip: str, new_public_ip: str) -> list[int]:
+def create_row(config: Config, new_local_ip: str, new_public_ip: str) -> None:
     response = requests.post(
         f"https://api.baserow.io/api/database/rows/table/{config.db_table_id}/?user_field_names=true",
         headers={
@@ -146,7 +151,7 @@ if __name__ == "__main__":
     old_node_identifier: Optional[str] = None
     old_local_ip: Optional[str] = None
     old_public_ip: Optional[str] = None
-    last_update_time = 0
+    last_update_time: float = 0
     if os.path.isfile(STATE_PATH):
         with open(STATE_PATH) as f:
             state = State(**json.load(f))
@@ -193,7 +198,7 @@ if __name__ == "__main__":
                 node_identifier=new_node_identifier,
                 local_ip=new_local_ip,
                 public_ip=new_public_ip,
-                last_update_time=now
+                last_update_time=now,
             ).dict(),
             f,
             indent=4,
