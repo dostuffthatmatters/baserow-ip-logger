@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import subprocess
+import time
 from typing import Optional
 from pydantic import BaseModel
 import requests
@@ -16,12 +17,14 @@ class Config(BaseModel):
     db_token: str
     db_table_id: str
     db_node_identifier_field_id: str
+    seconds_between_updates: float
 
 
 class State(BaseModel):
     node_identifier: str
     local_ip: str
     public_ip: str
+    last_update_time: float
 
 
 def run_shell_command(command: str, working_directory: Optional[str] = None) -> str:
@@ -143,17 +146,20 @@ if __name__ == "__main__":
     old_node_identifier: Optional[str] = None
     old_local_ip: Optional[str] = None
     old_public_ip: Optional[str] = None
+    last_update_time = 0
     if os.path.isfile(STATE_PATH):
         with open(STATE_PATH) as f:
             state = State(**json.load(f))
             old_node_identifier = state.node_identifier
             old_local_ip = state.local_ip
             old_public_ip = state.public_ip
+            last_update_time = state.last_update_time
 
     # determine new entry
     new_node_identifier = config.node_identifier
     new_local_ip = get_local_ip()
     new_public_ip = get_public_ip()
+    now = time.time()
 
     # abort when nothing has changed -> no network requests
     if all(
@@ -164,7 +170,11 @@ if __name__ == "__main__":
         ]
     ):
         print("nothing has changed")
-        exit(0)
+        if now < (last_update_time + config.seconds_between_updates):
+            print("exiting due to recent update")
+            exit(0)
+        else:
+            print("renewing old entry")
 
     # get list of outdated entries
     existing_row_ids = get_existing_row_ids(config)
@@ -183,6 +193,7 @@ if __name__ == "__main__":
                 node_identifier=new_node_identifier,
                 local_ip=new_local_ip,
                 public_ip=new_public_ip,
+                last_update_time=now
             ).dict(),
             f,
             indent=4,
