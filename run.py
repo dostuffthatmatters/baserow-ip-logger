@@ -1,3 +1,4 @@
+import datetime
 import json
 import os
 import re
@@ -143,6 +144,8 @@ def create_row(config: Config, new_local_ip: str, new_public_ip: str) -> None:
 
 
 if __name__ == "__main__":
+    print(f"running at {datetime.datetime.now()}")
+
     # load config from "config.json"
     with open(CONFIG_PATH) as f:
         config = Config(**json.load(f))
