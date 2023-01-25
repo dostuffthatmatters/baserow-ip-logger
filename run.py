@@ -71,46 +71,50 @@ def delete_row_ids(config: Config, row_ids: list[int]) -> None:
     assert response.status_code == 204, f"response failed: {response.json()}"
 
 
-def get_local_ip() -> str:
-    local_interface_ips: list[str] = []
+def get_interface_names() -> list[str]:
     if sys.platform == "darwin":
-        interface_names = run_shell_command("ipconfig getiflist").split(" ")
-        print(f"interface_names = {interface_names}")
-        for interface_name in interface_names:
-            try:
-                local_interface_ip = run_shell_command(
-                    f"ipconfig getifaddr {interface_name}"
-                )
-                local_interface_ips.append(f"{interface_name}: {local_interface_ip}")
-            except:
-                pass
+        return run_shell_command("ipconfig getiflist").split(" ")
     elif sys.platform == "linux":
-        interface_names = (
+        return (
             run_shell_command("ls /sys/class/net")
             .replace("\n", " ")
             .replace("\t", " ")
             .split(" ")
         )
-        print(f"interface_names = {interface_names}")
-        for interface_name in interface_names:
-            try:
-                local_interface_config = run_shell_command(f"ifconfig {interface_name}")
-                ip_matches = re.compile(r"inet\s+\d+\.\d+\.\d+\.\d+").findall(
-                    local_interface_config
-                )
-                assert len(ip_matches) == 1
-                local_interface_ips.append(
-                    f"{interface_name}: {ip_matches[0].replace('inet ', '')}"
-                )
-            except:
-                pass
     else:
         raise Exception("not working on windows")
 
-    if len(local_interface_ips) == 0:
+
+def get_interface_ip(interface_name: str) -> Optional[str]:
+    if sys.platform == "darwin":
+        try:
+            return run_shell_command(f"ipconfig getifaddr {interface_name}")
+        except:
+            return None
+    elif sys.platform == "linux":
+        try:
+            local_interface_config = run_shell_command(f"ifconfig {interface_name}")
+            ip_matches = re.compile(r"inet\s+\d+\.\d+\.\d+\.\d+").findall(
+                local_interface_config
+            )
+            assert len(ip_matches) == 1
+            return ip_matches[0].replace("inet ", "")
+        except:
+            return None
+    else:
+        raise Exception("not working on windows")
+
+
+def get_local_ip() -> str:
+    interface_names = get_interface_names()
+    interface_ips = [get_interface_ip(n) for n in interface_names]
+    ip_strings = [
+        f"{n}: {i}" for n, i in zip(interface_names, interface_ips) if i is not None
+    ]
+    if len(ip_strings) == 0:
         return "no network"
     else:
-        return "; ".join(local_interface_ips)
+        return "; ".join(ip_strings)
 
 
 def get_hostname() -> str:
