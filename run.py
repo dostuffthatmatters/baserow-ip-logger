@@ -4,7 +4,6 @@ import os
 import re
 import sys
 import subprocess
-import time
 from typing import Optional
 from pydantic import BaseModel
 import requests
@@ -14,17 +13,13 @@ STATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.jso
 
 
 class Config(BaseModel):
-    node_identifier: str
     db_token: str
     db_table_id: str
     db_node_identifier_field_id: str
-    seconds_between_updates: float
 
 
 class State(BaseModel):
-    node_identifier: str
     local_ip: str
-    public_ip: str
     last_update_time: float
 
 
@@ -50,11 +45,11 @@ def run_shell_command(command: str, working_directory: Optional[str] = None) -> 
     return stdout.strip()
 
 
-def get_existing_row_ids(config: Config) -> list[int]:
+def get_existing_row_ids(config: Config, hostname: str) -> list[int]:
     response = requests.get(
         f"https://api.baserow.io/api/database/rows/table/"
         + f"{config.db_table_id}/?user_field_names=true&filter__"
-        + f"{config.db_node_identifier_field_id}__equal={config.node_identifier}",
+        + f"{config.db_node_identifier_field_id}__equal={hostname}",
         headers={"Authorization": f"Token {config.db_token}"},
     )
     assert response.status_code == 200, f"response failed: {response.json()}"
@@ -77,9 +72,10 @@ def delete_row_ids(config: Config, row_ids: list[int]) -> None:
 
 
 def get_local_ip() -> str:
+    local_interface_ips: list[str] = []
     if sys.platform == "darwin":
         interface_names = run_shell_command("ipconfig getiflist").split(" ")
-        local_interface_ips: list[str] = []
+        print(f"interface_names = {interface_names}")
         for interface_name in interface_names:
             try:
                 local_interface_ip = run_shell_command(
@@ -88,7 +84,6 @@ def get_local_ip() -> str:
                 local_interface_ips.append(f"{interface_name}: {local_interface_ip}")
             except:
                 pass
-        return "; ".join(local_interface_ips)
     elif sys.platform == "linux":
         interface_names = (
             run_shell_command("ls /sys/class/net")
@@ -97,11 +92,7 @@ def get_local_ip() -> str:
             .split(" ")
         )
         print(f"interface_names = {interface_names}")
-        local_interface_ips: list[str] = []
         for interface_name in interface_names:
-            if not any([s in interface_name for s in ["en", "eth", "wlan"]]):
-                print(f"skipping interface '{interface_name}'")
-                continue
             try:
                 local_interface_config = run_shell_command(f"ifconfig {interface_name}")
                 ip_matches = re.compile(r"inet\s+\d+\.\d+\.\d+\.\d+").findall(
@@ -113,21 +104,45 @@ def get_local_ip() -> str:
                 )
             except:
                 pass
-        return "; ".join(local_interface_ips)
     else:
-        return "unknown"
+        raise Exception("not working on windows")
+
+    if len(local_interface_ips) == 0:
+        return "no network"
+    else:
+        return "; ".join(local_interface_ips)
 
 
-def get_public_ip() -> str:
-    response = requests.get("http://checkip.dyndns.com/")
-    ip_address_matches: list[str] = re.compile(r"\d+\.\d+\.\d+\.\d+").findall(
-        response.text
-    )
-    assert len(ip_address_matches) == 1
-    return ip_address_matches[0]
+def get_hostname() -> str:
+    return ".".join(run_shell_command("hostname").split(".")[:-1])
 
 
-def create_row(config: Config, new_local_ip: str, new_public_ip: str) -> None:
+def get_seconds_since_boot() -> float:
+    if sys.platform == "darwin":
+        last_reboot_string = (
+            run_shell_command("last reboot | head -n 1")
+            .replace("\t", " ")
+            .replace("  ", " ")
+            .strip()
+            .split(" ")[-4:]
+        )
+        last_reboot_string = last_reboot_string[:8]
+        now = datetime.datetime.now()
+        last_reboot_time = datetime.datetime.strptime(
+            f"{now.year} {last_reboot_string[0]} {last_reboot_string[1]} {last_reboot_string[2].zfill(2)} {last_reboot_string[3]}",
+            "%Y %a %b %d %H:%M",
+        )
+        seconds_since_reboot = (now - last_reboot_time).total_seconds()
+        if seconds_since_reboot < 0:
+            seconds_since_reboot += 365.25 * 24 * 3600
+        return seconds_since_reboot
+    elif sys.platform == "linux":
+        return float(run_shell_command("awk '{print $1}' /proc/uptime"))
+    else:
+        raise Exception("not working on windows")
+
+
+def create_row(config: Config, new_local_ip: str, hostname: str) -> None:
     response = requests.post(
         f"https://api.baserow.io/api/database/rows/table/{config.db_table_id}/?user_field_names=true",
         headers={
@@ -135,9 +150,9 @@ def create_row(config: Config, new_local_ip: str, new_public_ip: str) -> None:
             "Content-Type": "application/json",
         },
         json={
-            "node-identifier": config.node_identifier,
+            "node-identifier": hostname,
             "local-ip-address": new_local_ip,
-            "public-ip-address": new_public_ip,
+            "public-ip-address": "-",
         },
     )
     assert response.status_code == 200, f"response failed: {response.json()}"
@@ -151,45 +166,37 @@ if __name__ == "__main__":
         config = Config(**json.load(f))
 
     # load old entry
-    old_node_identifier: Optional[str] = None
     old_local_ip: Optional[str] = None
-    old_public_ip: Optional[str] = None
     last_update_time: float = 0
     if os.path.isfile(STATE_PATH):
         with open(STATE_PATH) as f:
             state = State(**json.load(f))
-            old_node_identifier = state.node_identifier
             old_local_ip = state.local_ip
-            old_public_ip = state.public_ip
             last_update_time = state.last_update_time
 
-    # determine new entry
-    new_node_identifier = config.node_identifier
-    new_local_ip = get_local_ip()
-    new_public_ip = get_public_ip()
-    now = time.time()
+    # detect changes or reboots
+    now = datetime.datetime.now()
+    seconds_since_reboot = get_seconds_since_boot()
 
-    # abort when nothing has changed -> no network requests
-    if all(
-        [
-            old_node_identifier == new_node_identifier,
-            old_local_ip == new_local_ip,
-            old_public_ip == new_public_ip,
-        ]
-    ):
-        print("nothing has changed")
-        if now < (last_update_time + config.seconds_between_updates):
-            print("exiting due to recent update")
-            exit(0)
-        else:
-            print("renewing old entry")
+    new_local_ip = get_local_ip()
+    ip_has_changed = old_local_ip != new_local_ip
+    reboot_happened = (now.timestamp() - last_update_time) > seconds_since_reboot
+    print(f"new_local_ip = {new_local_ip}")
+    print(f"ip_has_changed = {ip_has_changed}")
+    print(f"reboot_happened = {reboot_happened}")
+
+    if (not ip_has_changed) and (not reboot_happened):
+        print("nothing to update, exiting")
+        exit(0)
+
+    hostname = get_hostname()
 
     # get list of outdated entries
-    existing_row_ids = get_existing_row_ids(config)
+    existing_row_ids = get_existing_row_ids(config, hostname)
     print(f"old row ids: {existing_row_ids}")
 
     # add new entry
-    create_row(config, new_local_ip, new_public_ip)
+    create_row(config, new_local_ip, hostname)
 
     # remove existing rows after successful update
     delete_row_ids(config, existing_row_ids)
@@ -198,10 +205,8 @@ if __name__ == "__main__":
     with open(STATE_PATH, "w") as f:
         json.dump(
             State(
-                node_identifier=new_node_identifier,
                 local_ip=new_local_ip,
-                public_ip=new_public_ip,
-                last_update_time=now,
+                last_update_time=now.timestamp(),
             ).dict(),
             f,
             indent=4,
