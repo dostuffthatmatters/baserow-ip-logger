@@ -106,10 +106,12 @@ def get_interface_ip(interface_name: str) -> Optional[str]:
 
 
 def get_local_ip() -> str:
-    interface_names = get_interface_names()
+    interface_names = list(sorted(get_interface_names()))
     interface_ips = [get_interface_ip(n) for n in interface_names]
     ip_strings = [
-        f"{n}: {i}" for n, i in zip(interface_names, interface_ips) if i is not None
+        f"{n}: {i}"
+        for n, i in zip(interface_names, interface_ips)
+        if (i is not None) and (not i.startswith("127"))
     ]
     if len(ip_strings) == 0:
         return "no network"
