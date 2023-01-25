@@ -114,7 +114,11 @@ def get_local_ip() -> str:
 
 
 def get_hostname() -> str:
-    return ".".join(run_shell_command("hostname").split(".")[:-1])
+    raw_hostname = run_shell_command("hostname")
+    if "." in raw_hostname:
+        return raw_hostname.split(".")[0]
+    else:
+        return raw_hostname
 
 
 def get_seconds_since_boot() -> float:
