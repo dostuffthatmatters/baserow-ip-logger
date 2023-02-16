@@ -1,4 +1,4 @@
-# Baserow IP Logger
+# 🪵 Baserow IP Logger
 
 This tool automatically logs the local IP into a https://baserow.io/ table. We need it because we don't have publicly routed IPs on most of our devices and didn't find a practical way to discover local devices in our big university network yet.
 
@@ -10,7 +10,7 @@ It only pushes updates on changes in the network state or reboot. We decided to 
 
 <br/>
 
-## How to run it?
+## ⚡️ How to run it?
 
 1. Install dependencies in a local venv:
 
