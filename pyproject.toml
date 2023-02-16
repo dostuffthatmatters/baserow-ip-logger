@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "baserow-node-ip-management"
+name = "baserow-ip-logger"
 version = "0.1.0"
 description = ""
 authors = ["Moritz Makowski <moritz@dostuffthatmatters.dev>"]
